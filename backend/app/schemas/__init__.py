@@ -24,7 +24,9 @@ from .scrape_schema import (
 
 from .vector_schema import (
     Vector,
+    VectorBase,
     Dataset,
+    DatasetBase,
     VectorResponse,
     DatasetResponse,
 )
@@ -48,7 +50,9 @@ __all__ = [
     "ShouldRunScrapeResponse",
     # Vector schemas
     "Vector",
+    "VectorBase",
     "Dataset",
+    "DatasetBase",
     "VectorResponse",
     "DatasetResponse",
 ]

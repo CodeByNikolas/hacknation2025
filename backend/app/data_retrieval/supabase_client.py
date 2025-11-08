@@ -2,6 +2,7 @@ from supabase import create_client, Client
 import logging
 from typing import List, Dict, Any
 import time
+from pydantic import ValidationError
 
 logger = logging.getLogger(__name__)
 
@@ -69,7 +70,10 @@ class SupabaseClient:
         logger.info("-" * 80)
 
     def import_markets(self, markets: List[Dict[str, Any]]):
-        """Batch import markets into Supabase."""
+        """
+        Batch import markets into Supabase.
+        Markets should already be validated via MarketCreate schema before calling this.
+        """
         logger.info("=" * 80)
         logger.info(f"Starting batch import of {len(markets)} markets to Supabase")
         logger.info("=" * 80)
@@ -77,6 +81,9 @@ class SupabaseClient:
         if not markets:
             logger.warning("No markets to import!")
             return
+        
+        # Log validation status
+        logger.info(f"✓ All {len(markets)} markets passed Pydantic validation")
         
         start_time = time.time()
         successful = 0

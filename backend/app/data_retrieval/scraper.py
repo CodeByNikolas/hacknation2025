@@ -2,8 +2,10 @@ import logging
 from .polymarket_api import PolymarketAPI
 from .supabase_client import SupabaseClient
 from .scrape_tracker import ScrapeTracker
+from ..schemas.market_schema import MarketCreate
 from datetime import datetime
 import time
+import json
 
 logger = logging.getLogger(__name__)
 
@@ -84,29 +86,37 @@ def scrape_and_store_markets(supabase_url: str, supabase_api_key: str):
                 
                 # Ensure arrays are proper lists, not strings
                 if isinstance(outcomes, str):
-                    import json
                     try:
                         outcomes = json.loads(outcomes)
                     except:
                         outcomes = [outcomes]
                 
                 if isinstance(outcome_prices, str):
-                    import json
                     try:
                         outcome_prices = json.loads(outcome_prices)
                     except:
                         outcome_prices = [outcome_prices]
                 
-                market_data = {
-                    "polymarket_id": str(polymarket_id),
-                    "question": market.get("question"),
-                    "description": market.get("description"),
-                    "outcomes": outcomes if isinstance(outcomes, list) else [],
-                    "outcome_prices": [str(p) for p in outcome_prices] if isinstance(outcome_prices, list) else [],
-                    "end_date": market.get("endDate"),
-                    "volume": float(market.get("volume", 0)) if market.get("volume") else 0,
-                    "is_active": market.get("active", True),
-                }
+                # Create market data using Pydantic schema for validation
+                try:
+                    market_schema = MarketCreate(
+                        polymarket_id=str(polymarket_id),
+                        question=market.get("question") or "",
+                        description=market.get("description"),
+                        outcomes=outcomes if isinstance(outcomes, list) else [],
+                        outcome_prices=[str(p) for p in outcome_prices] if isinstance(outcome_prices, list) else [],
+                        end_date=market.get("endDate"),
+                        volume=float(market.get("volume", 0)) if market.get("volume") else 0.0,
+                        is_active=market.get("active", True),
+                    )
+                    
+                    # Convert validated schema to dict for database insertion
+                    market_data = market_schema.model_dump()
+                    
+                except Exception as validation_error:
+                    logger.warning(f"Skipping market {i}: Validation failed - {validation_error}")
+                    skipped += 1
+                    continue
                 
                 # Validate that essential fields are present
                 if not market_data["question"]:
