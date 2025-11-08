@@ -6,9 +6,11 @@
 import { useCallback, useState, useRef, useEffect } from "react";
 import { select } from "d3-selection";
 import type { Simulation } from "d3-force";
+import type { ZoomTransform } from "d3-zoom";
 import type { GraphData, GraphNode, GraphConnection } from "@/types/graph";
 import { useForceSimulation } from "@/hooks/useForceSimulation";
 import { createDragBehavior } from "@/hooks/useDrag";
+import { createZoomBehavior, type ZoomController } from "@/hooks/useZoom";
 import {
   getNodeColor,
   getConnectionWidth,
@@ -18,6 +20,7 @@ import {
 
 interface ForceGraphProps {
   data: GraphData;
+  onZoomControllerCreated?: (controller: ZoomController) => void;
 }
 
 /**
@@ -32,7 +35,7 @@ interface ForceGraphProps {
  *
  * @param props - Graph data
  */
-export function ForceGraph({ data }: ForceGraphProps) {
+export function ForceGraph({ data, onZoomControllerCreated }: ForceGraphProps) {
   // Create a stable mutable copy of the data ONCE using useState with lazy initialization
   // D3 will mutate these objects in place (adding x, y, vx, vy properties)
   // We must use the same object references for both simulation and rendering
@@ -56,6 +59,7 @@ export function ForceGraph({ data }: ForceGraphProps) {
 
   const containerRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
+  const transformGroupRef = useRef<SVGGElement>(null);
   const [dimensions, setDimensions] = useState({ width: 0, height: 0 });
   const [currentSimulation, setCurrentSimulation] = useState<Simulation<
     GraphNode,
@@ -64,6 +68,9 @@ export function ForceGraph({ data }: ForceGraphProps) {
 
   // State to trigger re-renders on simulation tick
   const [, setTick] = useState(0);
+
+  // Zoom state
+  const [zoomTransform, setZoomTransform] = useState<ZoomTransform | null>(null);
 
   // Callback to force re-render when simulation updates node positions
   const handleTick = useCallback(() => {
@@ -157,6 +164,46 @@ export function ForceGraph({ data }: ForceGraphProps) {
     console.log("[DEBUG] ✅ Drag behavior successfully applied to", nodeCircles.size(), "nodes");
   }, [currentSimulation, mutableData.nodes]);
 
+  // Apply zoom behavior to SVG AFTER dimensions are measured
+  // This effect runs after the SVG is rendered with proper dimensions
+  useEffect(() => {
+    console.log("[DEBUG] Zoom application effect triggered", {
+      hasSvg: !!svgRef.current,
+      hasTransformGroup: !!transformGroupRef.current,
+      width: dimensions.width,
+      height: dimensions.height,
+    });
+
+    if (!svgRef.current || !transformGroupRef.current || dimensions.width === 0 || dimensions.height === 0) {
+      console.log("[DEBUG] Cannot apply zoom - missing SVG ref, transform group ref, or dimensions");
+      return;
+    }
+
+    const handleTransformChange = (transform: ZoomTransform) => {
+      console.log("[DEBUG] Zoom transform changed:", {
+        scale: transform.k,
+        translate: [transform.x, transform.y],
+      });
+      setZoomTransform(transform);
+    };
+
+    const zoomController = createZoomBehavior(
+      svgRef.current,
+      handleTransformChange,
+      dimensions.width,
+      dimensions.height
+    );
+
+    console.log("[DEBUG] Zoom behavior created:", zoomController);
+
+    if (zoomController && onZoomControllerCreated) {
+      console.log("[DEBUG] Notifying parent of zoom controller");
+      onZoomControllerCreated(zoomController);
+    }
+
+    console.log("[DEBUG] ✅ Zoom behavior successfully applied");
+  }, [dimensions.width, dimensions.height, onZoomControllerCreated]);
+
   const nodeRadius = getNodeRadius();
   const connectionColor = getConnectionColor();
 
@@ -181,8 +228,11 @@ export function ForceGraph({ data }: ForceGraphProps) {
         viewBox={`0 0 ${dimensions.width} ${dimensions.height}`}
         style={{ display: "block" }}
       >
-      {/* Container group for future zoom/pan transformations */}
-      <g>
+      {/* Container group for zoom/pan transformations */}
+      <g
+        ref={transformGroupRef}
+        transform={zoomTransform?.toString() || undefined}
+      >
         {/* Render connections first (behind nodes) */}
         <g className="connections">
           {mutableData.connections.map((connection, index) => {
