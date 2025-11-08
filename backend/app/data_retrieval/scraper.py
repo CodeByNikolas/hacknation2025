@@ -1,6 +1,7 @@
 import logging
 from .polymarket_api import PolymarketAPI
 from .supabase_client import SupabaseClient
+from .scrape_tracker import ScrapeTracker
 from datetime import datetime
 import time
 
@@ -8,7 +9,8 @@ logger = logging.getLogger(__name__)
 
 def scrape_and_store_markets(supabase_url: str, supabase_api_key: str):
     """
-    Scrapes active markets from Polymarket and stores them in Weaviate.
+    Scrapes active markets from Polymarket and stores them in Supabase.
+    Includes deduplication and distributed scrape tracking to prevent duplicate runs.
     """
     logger.info("\n")
     logger.info("🚀" * 40)
@@ -16,19 +18,45 @@ def scrape_and_store_markets(supabase_url: str, supabase_api_key: str):
     logger.info("🚀" * 40)
     
     start_time = time.time()
+    tracker = None
+    markets_fetched = 0
+    markets_added = 0
+    markets_failed = 0
     
     try:
         # Initialize clients
-        logger.info("\n📡 Step 1/4: Initializing API clients...")
+        logger.info("\n📡 Step 1/5: Initializing API clients...")
         polymarket_api = PolymarketAPI()
         supabase = SupabaseClient(supabase_url, supabase_api_key)
-
+        
+        # Initialize scrape tracker
+        tracker = ScrapeTracker(supabase.client)
+        
+        # Clean up any stale scrapes
+        tracker.cleanup_stale_scrapes()
+        
+        # Check if we should run the scrape
+        logger.info("\n🔍 Step 2/5: Checking scrape eligibility...")
+        should_run, reason = tracker.should_run_scrape(min_interval_minutes=55)
+        
+        if not should_run:
+            logger.warning(f"⏸️  SCRAPE SKIPPED: {reason}")
+            logger.info("=" * 80)
+            return
+        
+        logger.info(f"✓ Scrape approved: {reason}")
+        
+        # Start tracking this scrape
+        scrape_id = tracker.start_scrape()
+        if not scrape_id:
+            logger.warning("⚠️  Could not start scrape tracking, continuing anyway...")
+        
         # Ensure the table exists
-        logger.info("\n🗄️  Step 2/4: Setting up database table...")
+        logger.info("\n🗄️  Step 3/5: Setting up database table...")
         supabase.create_markets_table()
 
         # Scrape active markets
-        logger.info("\n📥 Step 3/4: Fetching markets from Polymarket API...")
+        logger.info("\n📥 Step 4/5: Fetching markets from Polymarket API...")
         active_markets = polymarket_api.get_active_markets()
         
         if not active_markets:
@@ -36,9 +64,11 @@ def scrape_and_store_markets(supabase_url: str, supabase_api_key: str):
             logger.warning("This might indicate an API issue or all markets are closed.")
             return
 
+        markets_fetched = len(active_markets)
+        
         # Prepare data for Supabase
-        logger.info("\n🔄 Step 4/4: Preparing and importing data to Supabase...")
-        logger.info(f"Processing {len(active_markets)} markets...")
+        logger.info("\n🔄 Step 5/5: Preparing and importing data to Supabase...")
+        logger.info(f"Processing {markets_fetched} markets...")
         
         markets_to_import = []
         skipped = 0
@@ -101,10 +131,23 @@ def scrape_and_store_markets(supabase_url: str, supabase_api_key: str):
         # Import data into Supabase
         if markets_to_import:
             supabase.import_markets(markets_to_import)
+            markets_added = len(markets_to_import)
+            markets_failed = skipped
         else:
             logger.warning("⚠️  No valid markets to import after processing!")
 
         elapsed = time.time() - start_time
+        
+        # Mark scrape as completed
+        if tracker:
+            tracker.complete_scrape(
+                markets_fetched=markets_fetched,
+                markets_added=markets_added,
+                markets_updated=markets_added,  # Upsert means this could be adds or updates
+                markets_failed=markets_failed,
+                duration_seconds=elapsed
+            )
+        
         logger.info("\n")
         logger.info("✅" * 40)
         logger.info(f"SCRAPING CYCLE COMPLETE - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
@@ -114,6 +157,14 @@ def scrape_and_store_markets(supabase_url: str, supabase_api_key: str):
 
     except Exception as e:
         elapsed = time.time() - start_time
+        
+        # Mark scrape as failed
+        if tracker:
+            tracker.fail_scrape(
+                error_message=str(e),
+                duration_seconds=elapsed
+            )
+        
         logger.error("\n")
         logger.error("❌" * 40)
         logger.error(f"SCRAPING CYCLE FAILED - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
