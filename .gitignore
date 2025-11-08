@@ -34,3 +34,6 @@ ENV/
 
 # dsstore files
 *.DS_Store
+frontend/CLAUDE.md
+frontend/CONTEXT.md
+frontend/PLAN.md

@@ -1,26 +1,65 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #0f172a;
+  --foreground: #f1f5f9;
+  --graph-bg: #0f172a;
+  --panel-bg: rgba(15, 23, 42, 0.8);
+  --panel-bg-solid: #1e293b;
+  --node-volatility-very-low: #dbeafe;
+  --node-volatility-low: #93c5fd;
+  --node-volatility-medium: #3b82f6;
+  --node-volatility-high: #1d4ed8;
+  --node-volatility-very-high: #1e3a8a;
+  --connection-base: rgba(148, 163, 184, 0.3);
+  --connection-pressure: #f59e0b;
+  --accent-blue: #3b82f6;
+  --accent-green: #10b981;
+  --accent-red: #ef4444;
+  --accent-amber: #f59e0b;
+  --text-primary: #f1f5f9;
+  --text-secondary: #94a3b8;
+  --text-muted: #64748b;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+  --color-graph-bg: var(--graph-bg);
+  --color-panel-bg: var(--panel-bg);
+  --color-panel-bg-solid: var(--panel-bg-solid);
+  --color-node-volatility-very-low: var(--node-volatility-very-low);
+  --color-node-volatility-low: var(--node-volatility-low);
+  --color-node-volatility-medium: var(--node-volatility-medium);
+  --color-node-volatility-high: var(--node-volatility-high);
+  --color-node-volatility-very-high: var(--node-volatility-very-high);
+  --color-connection-base: var(--connection-base);
+  --color-connection-pressure: var(--connection-pressure);
+  --color-accent-blue: var(--accent-blue);
+  --color-accent-green: var(--accent-green);
+  --color-accent-red: var(--accent-red);
+  --color-accent-amber: var(--accent-amber);
+  --color-text-primary: var(--text-primary);
+  --color-text-secondary: var(--text-secondary);
+  --color-text-muted: var(--text-muted);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-geist-sans), system-ui, -apple-system, sans-serif;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+#__next {
+  width: 100%;
+  height: 100vh;
 }
