@@ -111,7 +111,8 @@ def scrape_and_store_markets(supabase_url: str, supabase_api_key: str):
                     )
                     
                     # Convert validated schema to dict for database insertion
-                    market_data = market_schema.model_dump()
+                    # mode='json' ensures datetime objects are serialized to ISO format strings
+                    market_data = market_schema.model_dump(mode='json')
                     
                 except Exception as validation_error:
                     logger.warning(f"Skipping market {i}: Validation failed - {validation_error}")

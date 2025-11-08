@@ -87,7 +87,7 @@ class ScrapeTracker:
             )
             
             result = self.client.table('scrape_history').insert(
-                scrape_create.model_dump(exclude_none=True)
+                scrape_create.model_dump(mode='json', exclude_none=True)
             ).execute()
             
             if result.data and len(result.data) > 0:
@@ -118,7 +118,7 @@ class ScrapeTracker:
             )
             
             self.client.table('scrape_history').update(
-                update_data.model_dump(exclude_none=True)
+                update_data.model_dump(mode='json', exclude_none=True)
             ).eq('id', self.scrape_id).execute()
             
         except Exception as e:
@@ -148,7 +148,7 @@ class ScrapeTracker:
             )
             
             self.client.table('scrape_history').update(
-                complete_data.model_dump(exclude_none=True)
+                complete_data.model_dump(mode='json', exclude_none=True)
             ).eq('id', self.scrape_id).execute()
             
             logger.info(f"✓ Scrape #{self.scrape_id} completed successfully")
@@ -182,7 +182,7 @@ class ScrapeTracker:
             )
             
             self.client.table('scrape_history').update(
-                fail_data.model_dump(exclude_none=True)
+                fail_data.model_dump(mode='json', exclude_none=True)
             ).eq('id', self.scrape_id).execute()
             
             logger.error(f"✗ Scrape #{self.scrape_id} marked as failed")
