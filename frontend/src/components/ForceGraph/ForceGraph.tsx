@@ -15,6 +15,7 @@ import { useCluster } from "@/hooks/useCluster";
 import {
   getNodeColorWithThresholds,
   getConnectionWidth,
+  getEnhancedConnectionWidth,
   getConnectionColor,
   getNodeRadius,
   shouldNodePulseWithThresholds,
@@ -417,7 +418,10 @@ export function ForceGraph({ data, onZoomControllerCreated, onClusterControllerC
               return null;
             }
 
-            const strokeWidth = getConnectionWidth(connection.correlation);
+            // Use correlation-based width for global view, enhanced width for cluster view
+            const strokeWidth = clusterState.selectedNodeId !== null
+              ? getEnhancedConnectionWidth(connection.correlation, connection.pressure)
+              : getConnectionWidth(connection.correlation);
             const connectionOpacity = getConnectionOpacity(index);
 
             return (
@@ -432,7 +436,7 @@ export function ForceGraph({ data, onZoomControllerCreated, onClusterControllerC
                 strokeLinecap="round"
                 opacity={connectionOpacity}
                 style={{
-                  transition: "opacity 300ms ease-in-out",
+                  transition: "opacity 300ms ease-in-out, stroke-width 300ms ease-in-out",
                 }}
               />
             );

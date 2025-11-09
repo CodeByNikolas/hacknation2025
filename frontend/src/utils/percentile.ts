@@ -95,3 +95,42 @@ export function calculateVolatilityThresholds(volatilities: number[]): Volatilit
     max: sorted[sorted.length - 1],
   };
 }
+
+/**
+ * Pressure thresholds for connection opacity scaling
+ */
+export interface PressureThresholds {
+  p40: number;  // 40th percentile - below this is least opaque
+  p60: number;  // 60th percentile - middle opacity range
+  p80: number;  // 80th percentile - above this is most opaque
+  min: number;  // Minimum value
+  max: number;  // Maximum value
+}
+
+/**
+ * Calculates pressure thresholds from connection data
+ * @param pressures - Array of pressure values from connections
+ * @returns Thresholds for opacity scaling
+ */
+export function calculatePressureThresholds(pressures: number[]): PressureThresholds {
+  if (pressures.length === 0) {
+    // Return default values if no data
+    return {
+      p40: 0.4,
+      p60: 0.6,
+      p80: 0.8,
+      min: 0,
+      max: 1,
+    };
+  }
+
+  const sorted = [...pressures].sort((a, b) => a - b);
+
+  return {
+    p40: getPercentileValue(sorted, 40),
+    p60: getPercentileValue(sorted, 60),
+    p80: getPercentileValue(sorted, 80),
+    min: sorted[0],
+    max: sorted[sorted.length - 1],
+  };
+}
