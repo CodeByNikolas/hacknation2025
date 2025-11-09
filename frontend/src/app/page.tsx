@@ -7,6 +7,8 @@ import { useState, useMemo } from "react";
 import { ForceGraph } from "@/components/ForceGraph/ForceGraph";
 import { ZoomControls } from "@/components/Controls/ZoomControls";
 import { SearchBar } from "@/components/Controls/SearchBar";
+import { NodeInfoPanel } from "@/components/Panels/NodeInfoPanel";
+import { HotTradesPanel } from "@/components/Panels/HotTradesPanel";
 import { isGraphData } from "@/types/graph";
 import type { ZoomController } from "@/hooks/useZoom";
 import type { ClusterController } from "@/types/graph";
@@ -39,6 +41,17 @@ export default function Home() {
   // Memoized to prevent re-computation on every render
   const uniqueNodes = useMemo(() => deduplicateNodes(graphData.nodes), []);
 
+  // Derive the currently selected node from the cluster controller
+  // Returns null if no node is selected or controller is not available
+  const selectedNode = useMemo(() => {
+    if (!clusterController) return null;
+
+    const selectedNodeId = clusterController.getSelectedNodeId();
+    if (!selectedNodeId) return null;
+
+    return uniqueNodes.find(node => node.id === selectedNodeId) || null;
+  }, [clusterController, uniqueNodes]);
+
   // Validate data structure at runtime
   if (!isGraphData(graphData)) {
     return (
@@ -60,11 +73,19 @@ export default function Home() {
         onClusterControllerCreated={setClusterController}
       />
       {clusterController && (
-        <SearchBar
-          nodes={uniqueNodes}
-          onNodeSelect={(nodeId) => clusterController.selectNode(nodeId)}
-          onClear={() => clusterController.clearSelection()}
-        />
+        <>
+          <NodeInfoPanel
+            nodes={uniqueNodes}
+            selectedNode={selectedNode}
+            onNodeSelect={(nodeId) => clusterController.selectNode(nodeId)}
+          />
+          <SearchBar
+            nodes={uniqueNodes}
+            onNodeSelect={(nodeId) => clusterController.selectNode(nodeId)}
+            onClear={() => clusterController.clearSelection()}
+          />
+          <HotTradesPanel />
+        </>
       )}
       {zoomController && (
         <ZoomControls
