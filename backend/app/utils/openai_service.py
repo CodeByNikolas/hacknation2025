@@ -492,14 +492,14 @@ Provide your correlation assessment."""
         
         return analysis
 
-async def similarity_search_datasets(
-    self,
-    query_dataset,
-    corpus_datasets: List,
-    top_k: int = 5
-) -> List[tuple[Any, float]]:
-    """
-    Find most similar datasets to a query dataset using cosine similarity of their vectors.
+    async def similarity_search_datasets(
+        self,
+        query_dataset,
+        corpus_datasets: List,
+        top_k: int = 5
+    ) -> List[tuple[Any, float]]:
+        """
+        Find most similar datasets to a query dataset using cosine similarity of their vectors.
 
         Args:
             query_dataset: The dataset to use as the query
