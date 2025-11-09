@@ -9,6 +9,7 @@ from app.services.vector_service import get_vector_service
 from app.utils.openai_service import get_openai_helper
 import logging
 import numpy as np
+import asyncio
 
 logger = logging.getLogger(__name__)
 
@@ -31,8 +32,10 @@ class RelationService:
         self,
         market_id: int,
         limit: int = 10,
-        min_similarity: float = 0.7
-    ) -> List[Tuple[int, float, float, float]]:
+        min_similarity: float = 0.7,
+        min_volume: Optional[float] = None,
+        include_ai_analysis: bool = False
+    ) -> List[Tuple[int, float, float, float, Optional[float], Optional[str]]]:
         """
         Get related markets from stored relations.
         
@@ -40,9 +43,11 @@ class RelationService:
             market_id: Source market ID
             limit: Maximum number of results
             min_similarity: Minimum similarity threshold
+            min_volume: Minimum market volume filter (optional)
+            include_ai_analysis: Include AI-generated correlation analysis (default: False)
             
         Returns:
-            List of (related_market_id, similarity, correlation, pressure) tuples
+            List of (related_market_id, similarity, correlation, pressure, ai_score, ai_explanation) tuples
         """
         try:
             # Query relations where this market is involved
@@ -51,25 +56,88 @@ class RelationService:
                 .or_(f"market_id_1.eq.{market_id},market_id_2.eq.{market_id}")\
                 .gte('similarity', min_similarity)\
                 .order('similarity', desc=True)\
-                .limit(limit)\
+                .limit(limit * 3)\
                 .execute()
             
-            results = []
+            # Extract all related market IDs
+            basic_results = []
             for relation in response.data:
-                # Return the OTHER market ID
                 related_id = (
                     relation['market_id_2'] 
                     if relation['market_id_1'] == market_id 
                     else relation['market_id_1']
                 )
-                results.append((
+                basic_results.append((
                     related_id,
                     float(relation['similarity']),
                     float(relation.get('correlation', 0.0)),
                     float(relation.get('pressure', 0.0))
                 ))
             
-            return results
+            # If no filtering or AI needed, return immediately
+            if min_volume is None and not include_ai_analysis:
+                return [(mid, sim, corr, press, None, None) for mid, sim, corr, press in basic_results[:limit]]
+            
+            # Fetch ALL markets in a SINGLE batch request (MUCH FASTER!)
+            market_ids_to_fetch = [mid for mid, _, _, _ in basic_results]
+            markets = await self.db.batch_get_markets_by_ids(market_ids_to_fetch)
+            
+            # Build market cache
+            market_cache = {market.id: market for market in markets}
+            
+            # Apply volume filter if needed
+            results = []
+            for related_id, similarity, correlation, pressure in basic_results:
+                if min_volume is not None:
+                    market = market_cache.get(related_id)
+                    if not market or (market.volume or 0.0) < min_volume:
+                        continue
+                
+                results.append((related_id, similarity, correlation, pressure))
+                
+                # Stop if we have enough results
+                if len(results) >= limit:
+                    break
+            
+            # If no AI analysis needed, return quickly
+            if not include_ai_analysis:
+                return [(mid, sim, corr, press, None, None) for mid, sim, corr, press in results]
+            
+            # AI analysis enabled - process in parallel
+            logger.info(f"Performing AI analysis for {len(results)} markets in parallel...")
+            
+            # Get source market for AI analysis
+            source_market = await self.db.get_market_by_id(market_id)
+            if not source_market:
+                return [(mid, sim, corr, press, None, None) for mid, sim, corr, press in results]
+            
+            async def analyze_one(related_id, similarity, correlation, pressure):
+                market = market_cache.get(related_id)
+                if not market:
+                    market = await self.db.get_market_by_id(related_id)
+                
+                if not market:
+                    return (related_id, similarity, correlation, pressure, None, None)
+                
+                try:
+                    openai_helper = get_openai_helper()
+                    analysis = await openai_helper.analyze_market_correlation(
+                        market1_question=source_market.question,
+                        market1_description=source_market.description,
+                        market2_question=market.question,
+                        market2_description=market.description
+                    )
+                    return (related_id, similarity, correlation, pressure, analysis.correlation_score, analysis.explanation)
+                except Exception as e:
+                    logger.warning(f"Failed AI analysis for market {related_id}: {e}")
+                    return (related_id, similarity, correlation, pressure, None, None)
+            
+            # Process all in parallel
+            analysis_tasks = [analyze_one(mid, sim, corr, press) for mid, sim, corr, press in results]
+            results_with_ai = await asyncio.gather(*analysis_tasks)
+            
+            logger.info(f"✓ Completed AI analysis for {len(results_with_ai)} markets")
+            return results_with_ai
             
         except Exception as e:
             logger.error(f"Error getting related markets: {e}")
@@ -80,18 +148,20 @@ class RelationService:
         market_id: int,
         limit: int = 10,
         min_similarity: float = 0.7,
+        min_volume: Optional[float] = None,
         include_source: bool = True,
-        include_ai_analysis: bool = True
+        include_ai_analysis: bool = False
     ) -> dict:
         """
-        Get related markets from stored relations with full market details and AI correlation analysis.
+        Get related markets from stored relations with full market details and optional AI correlation analysis.
         
         Args:
             market_id: Source market ID
             limit: Maximum number of results
             min_similarity: Minimum similarity threshold
+            min_volume: Minimum market volume filter (optional)
             include_source: Whether to include source market details (default: True)
-            include_ai_analysis: Whether to include AI-generated correlation analysis (default: True)
+            include_ai_analysis: Whether to include AI-generated correlation analysis (default: False for speed)
             
         Returns:
             Dictionary with:
@@ -106,32 +176,58 @@ class RelationService:
                 if not source_market:
                     raise ValueError(f"Source market {market_id} not found")
             
-            # Get basic relations
+            # Get basic relations (without AI analysis - we'll do that separately)
             basic_results = await self.get_related_markets(
                 market_id=market_id,
                 limit=limit,
-                min_similarity=min_similarity
+                min_similarity=min_similarity,
+                min_volume=min_volume,
+                include_ai_analysis=False  # We'll handle AI separately with full market objects
             )
             
-            # Enrich with full market data and AI analysis
-            enriched_results = []
-            openai_helper = None
-            if include_ai_analysis:
-                openai_helper = get_openai_helper()
+            # Fetch all market details in a SINGLE batch request (MUCH FASTER!)
+            # Extract just the first 4 values (id, sim, corr, press) ignoring AI fields
+            market_ids_to_fetch = [related_id for related_id, _, _, _, _, _ in basic_results]
+            markets = await self.db.batch_get_markets_by_ids(market_ids_to_fetch)
             
-            for related_id, similarity, correlation, pressure in basic_results:
-                # Fetch full market details
-                market = await self.db.get_market_by_id(related_id)
+            # Build market lookup
+            market_lookup = {market.id: market for market in markets}
+            
+            # If AI analysis is NOT needed, return quickly
+            if not include_ai_analysis:
+                enriched_results = []
+                for related_id, similarity, correlation, pressure, _, _ in basic_results:
+                    market = market_lookup.get(related_id)
+                    if market:
+                        enriched_results.append((
+                            related_id,
+                            similarity,
+                            correlation,
+                            pressure,
+                            market,
+                            None,  # ai_correlation_score
+                            None   # ai_explanation
+                        ))
+                
+                return {
+                    "source_market": source_market,
+                    "related_markets": enriched_results
+                }
+            
+            # AI analysis enabled - process in parallel with rate limiting
+            logger.info(f"Performing AI analysis for {len(basic_results)} markets in parallel...")
+            
+            async def analyze_one_market(related_id, similarity, correlation, pressure):
+                market = market_lookup.get(related_id)
                 if not market:
-                    continue
+                    return None
                 
                 ai_correlation_score = None
                 ai_explanation = None
                 
-                # Get AI correlation analysis if enabled
-                if include_ai_analysis and source_market and openai_helper:
+                if source_market:
                     try:
-                        logger.info(f"Analyzing correlation between market {market_id} and {related_id} using AI...")
+                        openai_helper = get_openai_helper()
                         analysis = await openai_helper.analyze_market_correlation(
                             market1_question=source_market.question,
                             market1_description=source_market.description,
@@ -140,12 +236,10 @@ class RelationService:
                         )
                         ai_correlation_score = analysis.correlation_score
                         ai_explanation = analysis.explanation
-                        logger.info(f"AI correlation: {ai_correlation_score:.3f}")
                     except Exception as e:
-                        logger.warning(f"Failed to get AI correlation analysis for markets {market_id}-{related_id}: {e}")
-                        # Continue without AI analysis rather than failing completely
+                        logger.warning(f"Failed AI analysis for market {related_id}: {e}")
                 
-                enriched_results.append((
+                return (
                     related_id,
                     similarity,
                     correlation,
@@ -153,7 +247,18 @@ class RelationService:
                     market,
                     ai_correlation_score,
                     ai_explanation
-                ))
+                )
+            
+            # Process all AI analyses in parallel (MUCH FASTER!)
+            analysis_tasks = [
+                analyze_one_market(related_id, similarity, correlation, pressure)
+                for related_id, similarity, correlation, pressure, _, _ in basic_results
+            ]
+            
+            results_with_ai = await asyncio.gather(*analysis_tasks)
+            enriched_results = [r for r in results_with_ai if r is not None]
+            
+            logger.info(f"✓ Completed AI analysis for {len(enriched_results)} markets")
             
             return {
                 "source_market": source_market,

@@ -9,6 +9,8 @@ class RelatedMarket(BaseModel):
     similarity: float = Field(..., description="Similarity score (0.0-1.0)")
     correlation: float = Field(0.0, description="Correlation score")
     pressure: float = Field(0.0, description="Pressure score")
+    ai_correlation_score: Optional[float] = Field(None, description="AI-generated correlation score (0.0-1.0)")
+    ai_explanation: Optional[str] = Field(None, description="AI-generated explanation of relationship")
 
 class RelationSearchResponse(BaseModel):
     """Response for relation searches"""

@@ -13,6 +13,7 @@ from app.schemas.vector_schema import Dataset, Vector, MarketTopics, Topic
 import re
 import logging
 import asyncio
+import numpy as np
 
 logger = logging.getLogger(__name__)
 
@@ -458,30 +459,29 @@ Generate topics that represent the key concepts, domains, industries, technologi
         if market2_description:
             market2_context += f"\nDescription: {market2_description}"
         
-        system_message = """You are an expert analyst evaluating whether two prediction markets influence each other.
-Your task is to assess the correlation between the events and provide:
-1. A correlation score (0.0 to 1.0) indicating how much these events influence each other
-2. A brief explanation (2-3 sentences maximum) of the relationship
+        system_message = """You are an expert analyst evaluating prediction markets and causal relationships.
+Your task is to answer: How likely is it that the outcome of Event 2 will directly cause or lead to the outcome of Event 1? Rate the likelihood using a correlation score (0.0 to 1.0), and provide a brief explanation (2-3 sentences maximum). Focus on causality or directional influence.
 
-Correlation score guidelines:
-- 0.0-0.3: Little to no influence between events
-- 0.4-0.6: Moderate influence or indirect relationship
-- 0.7-0.9: Strong influence or direct causal relationship
-- 1.0: Events are essentially the same or perfectly correlated
+Scoring guide:
+- 0.0-0.3: Event 2 outcome has little or no effect on Event 1 outcome.
+- 0.4-0.6: Event 2 might moderately or indirectly increase the likelihood of Event 1.
+- 0.7-0.9: Event 2 outcome is likely to directly trigger Event 1 (strong causal link).
+- 1.0: Event 2 outcome guarantees Event 1, or both describe the same event.
 
-Be concise and focus on the actual causal or correlational relationship."""
+Examples:
+- "Will the Pope die this year?" (Event 1) ← "Who will be the next Pope?" (Event 2): No causal link; new Pope doesn't cause current Pope's death (low score).
+- "Will Israel strike Lebanon on Nov 5?" (Event 1) ← "Will there be a ground offensive in Lebanon by Dec 31?" (Event 2): Offensive doesn't guarantee earlier strike (low score).
+- "Will Bitcoin hit $100k?" (Event 1) ← "Will Bitcoin ETFs be approved?" (Event 2): ETF approval strongly increases chances of price surge (high score).
 
+Be concise and prioritize causal direction (Event 2 leading to Event 1)."""
+  
         prompt = f"""{market1_context}
 
 {market2_context}
 
-Analyze whether these two prediction market events influence or correlate with each other. 
-Consider:
-- Do they share common underlying factors?
-- Would the outcome of one affect the other?
-- Are they related to the same themes, topics, or events?
+Assess how likely it is that the outcome of Event 2 (above) will directly cause or lead to the outcome of Event 1. Focus on directional/causal influence: does Event 2 happening substantially increase the odds that Event 1 also happens? If not, explain why not.
 
-Provide your correlation assessment."""
+Provide your correlation score (0.0-1.0) and a brief explanation."""
 
         # Get structured output
         analysis = await self.get_structured_output(
@@ -491,15 +491,15 @@ Provide your correlation assessment."""
         )
         
         return analysis
-
-async def similarity_search_datasets(
-    self,
-    query_dataset,
-    corpus_datasets: List,
-    top_k: int = 5
-) -> List[tuple[Any, float]]:
-    """
-    Find most similar datasets to a query dataset using cosine similarity of their vectors.
+    
+    async def similarity_search_datasets(
+        self,
+        query_dataset,
+        corpus_datasets: List,
+        top_k: int = 5
+    ) -> List[tuple[Any, float]]:
+        """
+        Find most similar datasets to a query dataset using cosine similarity of their vectors.
 
         Args:
             query_dataset: The dataset to use as the query
@@ -509,8 +509,6 @@ async def similarity_search_datasets(
         Returns:
             List of (dataset, similarity_score) tuples, sorted by similarity
         """
-        import numpy as np
-
         # Extract vectors using vectorized operations
         query_vec = np.array(query_dataset.vector.vector)
         query_norm = np.linalg.norm(query_vec)

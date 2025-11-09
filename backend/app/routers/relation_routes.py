@@ -20,22 +20,29 @@ router = APIRouter(prefix="/relations", tags=["Relations"])
 @router.get("/{market_id}/enriched", response_model=EnrichedRelationResponse)
 async def get_related_markets_enriched(
     market_id: int,
-    limit: int = Query(10, ge=1, le=100, description="Maximum number of related markets"),
-    min_similarity: float = Query(0.7, ge=0.0, le=1.0, description="Minimum similarity threshold")
+    limit: int = Query(10, ge=1, le=1000, description="Maximum number of related markets"),
+    min_similarity: float = Query(0.7, ge=0.0, le=1.0, description="Minimum similarity threshold"),
+    min_volume: Optional[float] = Query(None, ge=0.0, description="Minimum market volume filter"),
+    ai_analysis: bool = Query(False, description="Include AI-generated correlation analysis (slower)")
 ):
     """
     Get related markets with full market details (enriched data).
     Returns markets with similarity >= min_similarity threshold, including full market objects.
     
-    Example: `/relations/123/enriched?limit=10&min_similarity=0.7`
+    Example: `/relations/123/enriched?limit=100&min_similarity=0.7&min_volume=10000&ai_analysis=true`
     
     Args:
         market_id: Source market ID
-        limit: Maximum number of results (default: 10)
+        limit: Maximum number of results (default: 10, max: 1000)
         min_similarity: Minimum similarity score (default: 0.7)
+        min_volume: Minimum market volume (optional, filters out low-volume markets)
+        ai_analysis: Include AI correlation analysis (default: False for speed)
     
     Returns:
         Enriched response with full market details for each related market
+    
+    Note:
+        AI analysis adds 1-3 seconds per market. Use sparingly for large result sets.
     """
     try:
         service = get_relation_service()
@@ -45,7 +52,9 @@ async def get_related_markets_enriched(
             market_id=market_id,
             limit=limit,
             min_similarity=min_similarity,
-            include_source=True
+            min_volume=min_volume,
+            include_source=True,
+            include_ai_analysis=ai_analysis
         )
         
         return EnrichedRelationResponse(
@@ -74,26 +83,36 @@ async def get_related_markets_enriched(
 @router.get("/{market_id}", response_model=RelationSearchResponse)
 async def get_related_markets(
     market_id: int,
-    limit: int = Query(10, ge=1, le=100, description="Maximum number of related markets"),
-    min_similarity: float = Query(0.7, ge=0.0, le=1.0, description="Minimum similarity threshold")
+    limit: int = Query(10, ge=1, le=1000, description="Maximum number of related markets"),
+    min_similarity: float = Query(0.7, ge=0.0, le=1.0, description="Minimum similarity threshold"),
+    min_volume: Optional[float] = Query(None, ge=0.0, description="Minimum market volume filter"),
+    ai_analysis: bool = Query(False, description="Include AI-generated correlation analysis (slower)")
 ):
     """
-    Get related markets from stored relations in database (basic version).
+    Get related markets from stored relations in database (lightweight version without full market objects).
     Returns markets with similarity >= min_similarity threshold.
     
-    Example: `/relations/123?limit=10&min_similarity=0.7`
+    Example: `/relations/123?limit=100&min_similarity=0.7&min_volume=10000&ai_analysis=true`
     
     Args:
         market_id: Source market ID
-        limit: Maximum number of results (default: 10)
+        limit: Maximum number of results (default: 10, max: 1000)
         min_similarity: Minimum similarity score (default: 0.7)
+        min_volume: Minimum market volume (optional, filters out low-volume markets)
+        ai_analysis: Include AI correlation analysis (default: False for speed)
+    
+    Note:
+        For full market details, use `/relations/{market_id}/enriched` instead.
+        AI analysis adds 1-3 seconds per market when enabled.
     """
     try:
         service = get_relation_service()
         results = await service.get_related_markets(
             market_id=market_id,
             limit=limit,
-            min_similarity=min_similarity
+            min_similarity=min_similarity,
+            min_volume=min_volume,
+            include_ai_analysis=ai_analysis
         )
         
         return RelationSearchResponse(
@@ -103,9 +122,11 @@ async def get_related_markets(
                     market_id=mid, 
                     similarity=sim, 
                     correlation=corr, 
-                    pressure=press
+                    pressure=press,
+                    ai_correlation_score=ai_score,
+                    ai_explanation=ai_explanation
                 )
-                for mid, sim, corr, press in results
+                for mid, sim, corr, press, ai_score, ai_explanation in results
             ],
             count=len(results)
         )
