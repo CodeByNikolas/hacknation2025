@@ -169,6 +169,50 @@ export function useCluster(
     return nodes.filter(node => clusterState.clusterNodeIds.has(node.id));
   }, [nodes, clusterState]);
 
+  /**
+   * Get the number of direct connections for a specific node
+   */
+  const getConnectionCount = useCallback((nodeId: string): number => {
+    return adjacencyMap.get(nodeId)?.size || 0;
+  }, [adjacencyMap]);
+
+  /**
+   * Compute connection statistics for all nodes
+   * Used for smart scaling of node sizes
+   */
+  const connectionStats = useMemo(() => {
+    const counts = nodes.map(node => adjacencyMap.get(node.id)?.size || 0);
+
+    if (counts.length === 0) {
+      return { min: 0, max: 0, average: 0, p50: 0, p75: 0, p90: 0, p95: 0 };
+    }
+
+    // Sort for percentile calculations
+    const sorted = [...counts].sort((a, b) => a - b);
+    const len = sorted.length;
+
+    // Calculate percentiles
+    const getPercentile = (p: number) => {
+      const index = Math.ceil((p / 100) * len) - 1;
+      return sorted[Math.max(0, Math.min(index, len - 1))];
+    };
+
+    const min = sorted[0];
+    const max = sorted[len - 1];
+    const sum = counts.reduce((a, b) => a + b, 0);
+    const average = sum / len;
+
+    return {
+      min,
+      max,
+      average,
+      p50: getPercentile(50),  // median
+      p75: getPercentile(75),
+      p90: getPercentile(90),
+      p95: getPercentile(95),
+    };
+  }, [nodes, adjacencyMap]);
+
   return {
     // State
     clusterState,
@@ -184,6 +228,10 @@ export function useCluster(
     getConnectionOpacity,
     getNodeScale,
     getClusterNodes,
+    getConnectionCount,
+
+    // Statistics
+    connectionStats,
 
     // Raw data
     adjacencyMap,

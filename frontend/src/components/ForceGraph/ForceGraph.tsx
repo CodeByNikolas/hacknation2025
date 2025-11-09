@@ -86,6 +86,8 @@ export function ForceGraph({ data, onZoomControllerCreated, onClusterControllerC
     getConnectionOpacity,
     getNodeScale,
     adjacencyMap,
+    getConnectionCount,
+    connectionStats,
   } = useCluster(mutableData.nodes, mutableData.connections);
 
   // Calculate volatility thresholds from current nodes for dynamic color scaling
@@ -282,6 +284,10 @@ export function ForceGraph({ data, onZoomControllerCreated, onClusterControllerC
     height: dimensions.height,
     onTick: handleTick,
     onSimulationCreated: handleSimulationCreated,
+    getNodeRadiusCallback: useCallback((node: GraphNode) => {
+      const connectionCount = getConnectionCount(node.id);
+      return getNodeRadius(connectionCount, connectionStats.p95);
+    }, [getConnectionCount, connectionStats]),
   });
 
   // Apply drag behavior to nodes AFTER they are rendered in the DOM
@@ -442,7 +448,8 @@ export function ForceGraph({ data, onZoomControllerCreated, onClusterControllerC
             }
 
             const fillColor = getNodeColorWithThresholds(node.volatility, volatilityThresholds);
-            const baseRadius = getNodeRadius(node.volatility);
+            const connectionCount = getConnectionCount(node.id);
+            const baseRadius = getNodeRadius(connectionCount, connectionStats.p95);
             const isPulsing = shouldNodePulseWithThresholds(node.volatility, volatilityThresholds);
 
             // Get cluster-based styling

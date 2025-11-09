@@ -94,21 +94,36 @@ export function getConnectionColor(): string {
 }
 
 /**
- * Calculates the radius for a node based on its volatility.
- * Higher volatility nodes are larger for clear visual emphasis.
- * Linear mapping from volatility to radius for noticeable diversity.
+ * Calculates the radius for a node based on its number of direct connections.
+ * Nodes with more connections are larger for clear visual emphasis of network importance.
+ * Supports both linear and logarithmic scaling for better visual distribution.
  *
- * @param volatility - Value between 0 and 1 representing market volatility
+ * @param connectionCount - Number of direct connections the node has
+ * @param maxConnections - Maximum expected connections for normalization (defaults to 20)
+ * @param useLogarithmic - Whether to use logarithmic scaling for better distribution (defaults to true)
  * @returns Node radius in pixels (5-11px range, 6px variation)
  */
-export function getNodeRadius(volatility: number): number {
+export function getNodeRadius(connectionCount: number, maxConnections: number = 20, useLogarithmic: boolean = true): number {
   const minRadius = 5;
   const maxRadius = 11;
   const radiusRange = maxRadius - minRadius;
 
-  // Linear mapping: 0 volatility = 5px, 1 volatility = 11px
+  let normalizedCount: number;
+
+  if (useLogarithmic && connectionCount > 0) {
+    // Logarithmic scaling for better visual distribution
+    // log(1) = 0, log(maxConnections) = max
+    const logCount = Math.log(connectionCount + 1); // +1 to handle 0 connections
+    const logMax = Math.log(maxConnections + 1);
+    normalizedCount = Math.min(logCount / logMax, 1);
+  } else {
+    // Linear scaling
+    normalizedCount = Math.min(connectionCount / maxConnections, 1);
+  }
+
+  // Map to radius range: 0 connections = 5px, max connections = 11px
   // This creates clear visual diversity (6px variation is very noticeable)
-  return minRadius + (volatility * radiusRange);
+  return minRadius + (normalizedCount * radiusRange);
 }
 
 /**
