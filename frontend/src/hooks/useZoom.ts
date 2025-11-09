@@ -32,6 +32,14 @@ export interface ZoomController {
    * Gets the current zoom transform.
    */
   getCurrentTransform: () => ZoomTransform;
+
+  /**
+   * Applies a specific zoom transform with animation.
+   * Useful for zoom-to-cluster or zoom-to-fit operations.
+   * @param transform - The target zoom transform
+   * @param duration - Animation duration in milliseconds (default: 500)
+   */
+  applyTransform: (transform: ZoomTransform, duration?: number) => void;
 }
 
 /**
@@ -57,14 +65,7 @@ export function createZoomBehavior(
   containerWidth: number,
   containerHeight: number
 ): ZoomController | null {
-  console.log("[DEBUG useZoom] createZoomBehavior called", {
-    svgElement: !!svgElement,
-    containerWidth,
-    containerHeight,
-  });
-
   if (!svgElement) {
-    console.warn("[DEBUG useZoom] No SVG element provided, returning null");
     return null;
   }
 
@@ -83,11 +84,6 @@ export function createZoomBehavior(
    * Updates the current transform and notifies parent component.
    */
   function handleZoom(event: D3ZoomEvent<SVGSVGElement, unknown>) {
-    console.log("[DEBUG useZoom] Zoom event:", {
-      scale: event.transform.k,
-      translate: [event.transform.x, event.transform.y],
-    });
-
     currentTransform = event.transform;
     onTransformChange(event.transform);
   }
@@ -102,38 +98,23 @@ export function createZoomBehavior(
   const svg = select(svgElement);
   svg.call(zoomBehavior);
 
-  console.log("[DEBUG useZoom] Zoom behavior applied to SVG", {
-    scaleExtent: [0.1, 5],
-    translateExtent,
-  });
-
   /**
    * Applies a programmatic zoom transformation with smooth transition.
    * @param transform - The target zoom transform
    */
   function applyProgrammaticZoom(transform: ZoomTransform) {
-    console.log("[DEBUG useZoom] Applying programmatic zoom:", {
-      scale: transform.k,
-      translate: [transform.x, transform.y],
-    });
-
     // svgElement is guaranteed non-null at this point (checked before creating controller)
     const svg = select(svgElement as SVGSVGElement);
-    svg
-      .transition()
-      .duration(300)
-      .call(zoomBehavior.transform, transform);
+    svg.transition().duration(300).call(zoomBehavior.transform, transform);
   }
 
   // Create controller object with programmatic zoom methods
   const controller: ZoomController = {
     zoomIn: (scaleFactor = 1.3) => {
-      console.log("[DEBUG useZoom] zoomIn called, scaleFactor:", scaleFactor);
       const newScale = currentTransform.k * scaleFactor;
 
       // Respect scale extent limits
       if (newScale > 5) {
-        console.warn("[DEBUG useZoom] Zoom in blocked - at max scale");
         return;
       }
 
@@ -143,12 +124,10 @@ export function createZoomBehavior(
     },
 
     zoomOut: (scaleFactor = 1.3) => {
-      console.log("[DEBUG useZoom] zoomOut called, scaleFactor:", scaleFactor);
       const newScale = currentTransform.k / scaleFactor;
 
       // Respect scale extent limits
       if (newScale < 0.1) {
-        console.warn("[DEBUG useZoom] Zoom out blocked - at min scale");
         return;
       }
 
@@ -158,12 +137,20 @@ export function createZoomBehavior(
     },
 
     resetZoom: () => {
-      console.log("[DEBUG useZoom] resetZoom called");
       applyProgrammaticZoom(zoomIdentity);
     },
 
     getCurrentTransform: () => {
       return currentTransform;
+    },
+
+    applyTransform: (transform: ZoomTransform, duration = 500) => {
+      // Apply the transform with custom duration
+      const svg = select(svgElement as SVGSVGElement);
+      svg
+        .transition()
+        .duration(duration)
+        .call(zoomBehavior.transform, transform);
     },
   };
 

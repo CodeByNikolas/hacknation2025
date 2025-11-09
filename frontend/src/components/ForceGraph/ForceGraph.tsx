@@ -6,16 +6,18 @@
 import { useCallback, useState, useRef, useEffect } from "react";
 import { select } from "d3-selection";
 import type { Simulation } from "d3-force";
-import type { ZoomTransform } from "d3-zoom";
+import { type ZoomTransform, zoomIdentity } from "d3-zoom";
 import type { GraphData, GraphNode, GraphConnection } from "@/types/graph";
 import { useForceSimulation } from "@/hooks/useForceSimulation";
-import { createDragBehavior } from "@/hooks/useDrag";
+import { createDragBehaviorWithClick } from "@/hooks/useDrag";
 import { createZoomBehavior, type ZoomController } from "@/hooks/useZoom";
+import { useCluster } from "@/hooks/useCluster";
 import {
   getNodeColor,
   getConnectionWidth,
   getConnectionColor,
   getNodeRadius,
+  shouldNodePulse,
 } from "@/lib/d3-helpers";
 
 interface ForceGraphProps {
@@ -69,8 +71,20 @@ export function ForceGraph({ data, onZoomControllerCreated }: ForceGraphProps) {
   // State to trigger re-renders on simulation tick
   const [, setTick] = useState(0);
 
-  // Zoom state
+  // Zoom state and controller reference
   const [zoomTransform, setZoomTransform] = useState<ZoomTransform | null>(null);
+  const zoomControllerRef = useRef<ZoomController | null>(null);
+
+  // Cluster state management
+  const {
+    clusterState,
+    selectNode,
+    clearSelection,
+    getNodeOpacity,
+    getConnectionOpacity,
+    getNodeScale,
+    adjacencyMap,
+  } = useCluster(mutableData.nodes, mutableData.connections);
 
   // Callback to force re-render when simulation updates node positions
   const handleTick = useCallback(() => {
@@ -80,11 +94,119 @@ export function ForceGraph({ data, onZoomControllerCreated }: ForceGraphProps) {
   // Callback to capture simulation instance when created
   const handleSimulationCreated = useCallback(
     (sim: Simulation<GraphNode, GraphConnection>) => {
-      console.log("[DEBUG] handleSimulationCreated called");
-      console.log("[DEBUG] Simulation instance:", sim);
       setCurrentSimulation(sim);
     },
     []
+  );
+
+  // Zoom to cluster functionality
+  const zoomToCluster = useCallback(
+    (clusterNodes: GraphNode[], duration = 500) => {
+      if (!zoomControllerRef.current || clusterNodes.length === 0) {
+        return;
+      }
+
+      // Filter nodes with valid positions
+      const validNodes = clusterNodes.filter(
+        (n) => n.x !== undefined && n.y !== undefined
+      );
+
+      if (validNodes.length === 0) {
+        return;
+      }
+
+      // Calculate bounding box
+      const xs = validNodes.map((n) => n.x!);
+      const ys = validNodes.map((n) => n.y!);
+      const minX = Math.min(...xs);
+      const maxX = Math.max(...xs);
+      const minY = Math.min(...ys);
+      const maxY = Math.max(...ys);
+
+      // Add padding
+      const padding = 100;
+      const width = maxX - minX + padding * 2;
+      const height = maxY - minY + padding * 2;
+      const centerX = (minX + maxX) / 2;
+      const centerY = (minY + maxY) / 2;
+
+      // Calculate scale to fit in view
+      const scale = Math.min(
+        dimensions.width / width,
+        dimensions.height / height,
+        2.5 // Max scale for zoom-to-cluster
+      );
+
+      // Calculate translation to center cluster
+      const translateX = dimensions.width / 2 - centerX * scale;
+      const translateY = dimensions.height / 2 - centerY * scale;
+
+      // Create new transform
+      const newTransform = zoomIdentity
+        .translate(translateX, translateY)
+        .scale(scale);
+
+      // Apply transform with animation using the zoom controller
+      zoomControllerRef.current.applyTransform(newTransform, duration);
+    },
+    [dimensions.width, dimensions.height]
+  );
+
+  // Handle node click for cluster selection
+  const handleNodeClick = useCallback(
+    (node: GraphNode) => {
+      // Check if clicking the same node (to toggle off)
+      if (clusterState.selectedNodeId === node.id) {
+        clearSelection();
+        // Reset zoom when deselecting
+        if (zoomControllerRef.current) {
+          zoomControllerRef.current.resetZoom();
+        }
+      } else {
+        // Determine if this is switching between clusters or selecting first cluster
+        const isSwitch = clusterState.selectedNodeId !== null;
+
+        // Update the selection state
+        selectNode(node.id);
+
+        // Compute cluster nodes directly without waiting for state update
+        // This ensures we zoom to the correct cluster immediately
+        const neighbors = adjacencyMap.get(node.id) || new Set<string>();
+        const clusterNodeIds = new Set([node.id, ...neighbors]);
+        const clusterNodes = mutableData.nodes.filter(n =>
+          clusterNodeIds.has(n.id) && n.x !== undefined && n.y !== undefined
+        );
+
+        // Zoom to the cluster
+        if (clusterNodes.length > 0) {
+          // Use faster zoom when switching between clusters to reduce visual discontinuity
+          // Use normal speed for first selection
+          const zoomDuration = isSwitch ? 200 : 500;
+          zoomToCluster(clusterNodes, zoomDuration);
+        }
+      }
+    },
+    [selectNode, clearSelection, clusterState.selectedNodeId, adjacencyMap, mutableData.nodes, zoomToCluster]
+  );
+
+  // Handle SVG click for clearing selection
+  const handleSvgClick = useCallback(
+    (event: React.MouseEvent) => {
+      // Only clear if clicking directly on SVG or connections (not on nodes)
+      const target = event.target as Element;
+      if (
+        target === event.currentTarget ||
+        target.closest('.connections') ||
+        target.tagName === 'svg'
+      ) {
+        clearSelection();
+        // Reset zoom to show full graph when clearing selection
+        if (zoomControllerRef.current) {
+          zoomControllerRef.current.resetZoom();
+        }
+      }
+    },
+    [clearSelection]
   );
 
   // Measure container dimensions on mount and window resize
@@ -121,69 +243,41 @@ export function ForceGraph({ data, onZoomControllerCreated }: ForceGraphProps) {
   // Apply drag behavior to nodes AFTER they are rendered in the DOM
   // This effect runs after the nodes are painted to the screen
   useEffect(() => {
-    console.log("[DEBUG] Drag application effect triggered", {
-      hasSimulation: !!currentSimulation,
-      hasSvg: !!svgRef.current,
-      nodesCount: mutableData.nodes.length
-    });
-
     if (!currentSimulation || !svgRef.current) {
-      console.log("[DEBUG] Cannot apply drag - missing simulation or SVG ref");
       return;
     }
 
-    const dragBehavior = createDragBehavior(currentSimulation);
-    console.log("[DEBUG] Drag behavior created:", dragBehavior);
+    const dragBehavior = createDragBehaviorWithClick({
+      simulation: currentSimulation,
+      onNodeClick: handleNodeClick,
+      clickThreshold: 5,
+    });
 
     if (!dragBehavior) {
-      console.warn("[DEBUG] Failed to create drag behavior");
       return;
     }
 
     const svg = select(svgRef.current);
     const nodeCircles = svg.selectAll<SVGCircleElement, GraphNode>(".node-circle");
 
-    console.log("[DEBUG] Selecting .node-circle elements");
-    console.log("[DEBUG] Found", nodeCircles.size(), "node circles");
-    console.log("[DEBUG] Node circle DOM elements:", nodeCircles.nodes());
-
     if (nodeCircles.size() === 0) {
-      console.warn("[DEBUG] No .node-circle elements found in DOM!");
-      // Debug: Let's see what elements ARE in the SVG
-      console.log("[DEBUG] All SVG children:", svgRef.current.querySelectorAll("*"));
       return;
     }
 
     // CRITICAL: Bind node data to circle elements so drag handlers receive the data
     // React renders circles in mutableData.nodes order, so we bind the same array by index
-    console.log("[DEBUG] Binding data to", mutableData.nodes.length, "nodes");
     nodeCircles.data(mutableData.nodes);
-    console.log("[DEBUG] Data bound successfully");
-
     nodeCircles.call(dragBehavior);
-    console.log("[DEBUG] ✅ Drag behavior successfully applied to", nodeCircles.size(), "nodes");
-  }, [currentSimulation, mutableData.nodes]);
+  }, [currentSimulation, mutableData.nodes, handleNodeClick]);
 
   // Apply zoom behavior to SVG AFTER dimensions are measured
   // This effect runs after the SVG is rendered with proper dimensions
   useEffect(() => {
-    console.log("[DEBUG] Zoom application effect triggered", {
-      hasSvg: !!svgRef.current,
-      hasTransformGroup: !!transformGroupRef.current,
-      width: dimensions.width,
-      height: dimensions.height,
-    });
-
     if (!svgRef.current || !transformGroupRef.current || dimensions.width === 0 || dimensions.height === 0) {
-      console.log("[DEBUG] Cannot apply zoom - missing SVG ref, transform group ref, or dimensions");
       return;
     }
 
     const handleTransformChange = (transform: ZoomTransform) => {
-      console.log("[DEBUG] Zoom transform changed:", {
-        scale: transform.k,
-        translate: [transform.x, transform.y],
-      });
       setZoomTransform(transform);
     };
 
@@ -194,17 +288,16 @@ export function ForceGraph({ data, onZoomControllerCreated }: ForceGraphProps) {
       dimensions.height
     );
 
-    console.log("[DEBUG] Zoom behavior created:", zoomController);
+    // Store zoom controller reference
+    if (zoomController) {
+      zoomControllerRef.current = zoomController;
 
-    if (zoomController && onZoomControllerCreated) {
-      console.log("[DEBUG] Notifying parent of zoom controller");
-      onZoomControllerCreated(zoomController);
+      if (onZoomControllerCreated) {
+        onZoomControllerCreated(zoomController);
+      }
     }
-
-    console.log("[DEBUG] ✅ Zoom behavior successfully applied");
   }, [dimensions.width, dimensions.height, onZoomControllerCreated]);
 
-  const nodeRadius = getNodeRadius();
   const connectionColor = getConnectionColor();
 
   // Don't render until we have measured dimensions
@@ -227,6 +320,7 @@ export function ForceGraph({ data, onZoomControllerCreated }: ForceGraphProps) {
         height="100%"
         viewBox={`0 0 ${dimensions.width} ${dimensions.height}`}
         style={{ display: "block" }}
+        onClick={handleSvgClick}
       >
       {/* Container group for zoom/pan transformations */}
       <g
@@ -260,6 +354,7 @@ export function ForceGraph({ data, onZoomControllerCreated }: ForceGraphProps) {
             }
 
             const strokeWidth = getConnectionWidth(connection.correlation);
+            const connectionOpacity = getConnectionOpacity(index);
 
             return (
               <line
@@ -271,6 +366,10 @@ export function ForceGraph({ data, onZoomControllerCreated }: ForceGraphProps) {
                 stroke={connectionColor}
                 strokeWidth={strokeWidth}
                 strokeLinecap="round"
+                opacity={connectionOpacity}
+                style={{
+                  transition: "opacity 300ms ease-in-out",
+                }}
               />
             );
           })}
@@ -285,9 +384,23 @@ export function ForceGraph({ data, onZoomControllerCreated }: ForceGraphProps) {
             }
 
             const fillColor = getNodeColor(node.volatility);
+            const baseRadius = getNodeRadius(node.volatility);
+            const isPulsing = shouldNodePulse(node.volatility);
+
+            // Get cluster-based styling
+            const nodeOpacity = getNodeOpacity(node.id);
+            const nodeScale = getNodeScale(node.id);
+            const nodeRadius = baseRadius * nodeScale;
 
             return (
-              <g key={`node-${node.id}-${nodeIndex}`} className="node">
+              <g
+                key={`node-${node.id}-${nodeIndex}`}
+                className={`node ${isPulsing ? 'node-high-volatility' : ''}`}
+                opacity={nodeOpacity}
+                style={{
+                  transition: "opacity 300ms ease-in-out",
+                }}
+              >
                 {/* Node circle */}
                 <circle
                   className="node-circle"
@@ -299,6 +412,7 @@ export function ForceGraph({ data, onZoomControllerCreated }: ForceGraphProps) {
                   strokeWidth={1.5}
                   style={{
                     cursor: "pointer",
+                    transition: "r 300ms ease-in-out",
                   }}
                 />
 
