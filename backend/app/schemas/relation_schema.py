@@ -82,6 +82,7 @@ class GraphNode(BaseModel):
     """Schema for a graph node (market)"""
     id: str = Field(..., description="Polymarket ID")
     name: str = Field(..., description="Market question")
+    shortened_name: Optional[str] = Field(None, description="AI-generated shortened name (3 words)")
     group: str = Field(..., description="Category/tag group")
     volatility: Optional[float] = Field(None, description="Volatility score (0.0-1.0)")
     volume: float = Field(..., description="Trading volume")

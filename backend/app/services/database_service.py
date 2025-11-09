@@ -7,6 +7,7 @@ from supabase import create_client, Client
 from app.core.config import settings
 from app.schemas.market_schema import Market, MarketCreate, MarketUpdate
 from app.schemas.vector_schema import VectorEmbedding
+from app.schemas.name_schema import ShortenedName
 import logging
 
 logger = logging.getLogger(__name__)
@@ -73,7 +74,7 @@ class DatabaseService:
         """
         try:
             response = self.client.table('markets').select(
-                '*, market_volatility!market_volatility_market_id_fkey(real_volatility_24h, proxy_volatility_24h, calculation_method, data_points, calculated_at)'
+                '*, market_volatility!market_volatility_market_id_fkey(real_volatility_24h, proxy_volatility_24h, calculation_method, data_points, calculated_at), shortened_names!shortened_names_market_id_fkey(shortened_name)'
             ).eq('id', market_id).execute()
             
             if response.data:
@@ -95,6 +96,17 @@ class DatabaseService:
                     market_dict['volatility_calculation_method'] = vol_data.get('calculation_method')
                     market_dict['volatility_data_points'] = vol_data.get('data_points')
                     market_dict['volatility_calculated_at'] = vol_data.get('calculated_at')
+                
+                # Extract shortened name data
+                shortened_name_data = market_dict.pop('shortened_names', None)
+                shortened_name_value = None
+                if shortened_name_data:
+                    if isinstance(shortened_name_data, dict):
+                        shortened_name_value = shortened_name_data.get('shortened_name')
+                    elif isinstance(shortened_name_data, list) and len(shortened_name_data) > 0:
+                        shortened_name_value = shortened_name_data[0].get('shortened_name')
+                
+                market_dict['shortened_name'] = shortened_name_value
                 
                 return Market(**market_dict)
             return None
@@ -127,9 +139,9 @@ class DatabaseService:
         
         for attempt in range(max_retries):
             try:
-                # Supabase 'in' filter for batch retrieval with volatility join
+                # Supabase 'in' filter for batch retrieval with volatility and shortened names join
                 response = self.client.table('markets').select(
-                    '*, market_volatility!market_volatility_market_id_fkey(real_volatility_24h, proxy_volatility_24h, calculation_method, data_points, calculated_at)'
+                    '*, market_volatility!market_volatility_market_id_fkey(real_volatility_24h, proxy_volatility_24h, calculation_method, data_points, calculated_at), shortened_names!shortened_names_market_id_fkey(shortened_name)'
                 ).in_('id', market_ids).execute()
                 
                 # Process the joined data
@@ -151,6 +163,17 @@ class DatabaseService:
                         market_dict['volatility_calculation_method'] = vol_data.get('calculation_method')
                         market_dict['volatility_data_points'] = vol_data.get('data_points')
                         market_dict['volatility_calculated_at'] = vol_data.get('calculated_at')
+                    
+                    # Extract shortened name data
+                    shortened_name_data = market_dict.pop('shortened_names', None)
+                    shortened_name_value = None
+                    if shortened_name_data:
+                        if isinstance(shortened_name_data, dict):
+                            shortened_name_value = shortened_name_data.get('shortened_name')
+                        elif isinstance(shortened_name_data, list) and len(shortened_name_data) > 0:
+                            shortened_name_value = shortened_name_data[0].get('shortened_name')
+                    
+                    market_dict['shortened_name'] = shortened_name_value
                     markets.append(Market(**market_dict))
                 
                 return markets
@@ -180,7 +203,7 @@ class DatabaseService:
         """
         try:
             response = self.client.table('markets').select(
-                '*, market_volatility!market_volatility_market_id_fkey(real_volatility_24h, proxy_volatility_24h, calculation_method, data_points, calculated_at)'
+                '*, market_volatility!market_volatility_market_id_fkey(real_volatility_24h, proxy_volatility_24h, calculation_method, data_points, calculated_at), shortened_names!shortened_names_market_id_fkey(shortened_name)'
             ).eq('polymarket_id', polymarket_id).execute()
             
             if response.data:
@@ -202,6 +225,17 @@ class DatabaseService:
                     market_dict['volatility_calculation_method'] = vol_data.get('calculation_method')
                     market_dict['volatility_data_points'] = vol_data.get('data_points')
                     market_dict['volatility_calculated_at'] = vol_data.get('calculated_at')
+                
+                # Extract shortened name data
+                shortened_name_data = market_dict.pop('shortened_names', None)
+                shortened_name_value = None
+                if shortened_name_data:
+                    if isinstance(shortened_name_data, dict):
+                        shortened_name_value = shortened_name_data.get('shortened_name')
+                    elif isinstance(shortened_name_data, list) and len(shortened_name_data) > 0:
+                        shortened_name_value = shortened_name_data[0].get('shortened_name')
+                
+                market_dict['shortened_name'] = shortened_name_value
                 
                 return Market(**market_dict)
             return None
@@ -233,10 +267,10 @@ class DatabaseService:
             List of Market objects with volatility data
         """
         try:
-            # LEFT JOIN with market_volatility table to get volatility scores
-            # Using the foreign key name to specify the relationship
+            # LEFT JOIN with market_volatility and shortened_names tables
+            # Using the foreign key names to specify the relationships
             query = self.client.table('markets').select(
-                '*, market_volatility!market_volatility_market_id_fkey(real_volatility_24h, proxy_volatility_24h, calculation_method, data_points, calculated_at)'
+                '*, market_volatility!market_volatility_market_id_fkey(real_volatility_24h, proxy_volatility_24h, calculation_method, data_points, calculated_at), shortened_names!shortened_names_market_id_fkey(shortened_name)'
             )
             
             # Apply filters
@@ -283,16 +317,28 @@ class DatabaseService:
                         market_dict['volatility_data_points'] = vol_data.get('data_points')
                         market_dict['volatility_calculated_at'] = vol_data.get('calculated_at')
                     
+                    # Extract shortened name data from nested structure
+                    shortened_name_data = market_dict.pop('shortened_names', None)
+                    shortened_name_value = None
+                    if shortened_name_data:
+                        if isinstance(shortened_name_data, dict):
+                            shortened_name_value = shortened_name_data.get('shortened_name')
+                        elif isinstance(shortened_name_data, list) and len(shortened_name_data) > 0:
+                            shortened_name_value = shortened_name_data[0].get('shortened_name')
+                    
+                    market_dict['shortened_name'] = shortened_name_value
+                    
                     markets.append(Market(**market_dict))
                 except Exception as e:
                     logger.error(f"Error processing market data: {e}, market_data keys: {list(market_data.keys())}")
-                    # Try to create market without volatility data as fallback
+                    # Try to create market without volatility/shortened name data as fallback
                     try:
                         market_dict = dict(market_data)
                         market_dict.pop('market_volatility', None)
+                        market_dict.pop('shortened_names', None)
                         markets.append(Market(**market_dict))
                     except Exception as e2:
-                        logger.error(f"Error creating market even without volatility: {e2}")
+                        logger.error(f"Error creating market even without joins: {e2}")
                         raise
             
             return markets
@@ -416,9 +462,9 @@ class DatabaseService:
             List of matching Market objects
         """
         try:
-            # Use ilike for case-insensitive partial match with volatility join
+            # Use ilike for case-insensitive partial match with volatility and shortened names join
             response = self.client.table('markets').select(
-                '*, market_volatility!market_volatility_market_id_fkey(real_volatility_24h, proxy_volatility_24h, calculation_method, data_points, calculated_at)'
+                '*, market_volatility!market_volatility_market_id_fkey(real_volatility_24h, proxy_volatility_24h, calculation_method, data_points, calculated_at), shortened_names!shortened_names_market_id_fkey(shortened_name)'
             ).or_(
                 f"question.ilike.%{query}%,description.ilike.%{query}%"
             ).limit(limit).execute()
@@ -442,6 +488,17 @@ class DatabaseService:
                     market_dict['volatility_calculation_method'] = vol_data.get('calculation_method')
                     market_dict['volatility_data_points'] = vol_data.get('data_points')
                     market_dict['volatility_calculated_at'] = vol_data.get('calculated_at')
+                
+                # Extract shortened name data
+                shortened_name_data = market_dict.pop('shortened_names', None)
+                shortened_name_value = None
+                if shortened_name_data:
+                    if isinstance(shortened_name_data, dict):
+                        shortened_name_value = shortened_name_data.get('shortened_name')
+                    elif isinstance(shortened_name_data, list) and len(shortened_name_data) > 0:
+                        shortened_name_value = shortened_name_data[0].get('shortened_name')
+                
+                market_dict['shortened_name'] = shortened_name_value
                 markets.append(Market(**market_dict))
             
             return markets
@@ -470,7 +527,7 @@ class DatabaseService:
         """
         try:
             response = self.client.table('markets').select(
-                '*, market_volatility!market_volatility_market_id_fkey(real_volatility_24h, proxy_volatility_24h, calculation_method, data_points, calculated_at)'
+                '*, market_volatility!market_volatility_market_id_fkey(real_volatility_24h, proxy_volatility_24h, calculation_method, data_points, calculated_at), shortened_names!shortened_names_market_id_fkey(shortened_name)'
             ).gte(
                 'end_date', start_date.isoformat()
             ).lte(
@@ -496,6 +553,17 @@ class DatabaseService:
                     market_dict['volatility_calculation_method'] = vol_data.get('calculation_method')
                     market_dict['volatility_data_points'] = vol_data.get('data_points')
                     market_dict['volatility_calculated_at'] = vol_data.get('calculated_at')
+                
+                # Extract shortened name data
+                shortened_name_data = market_dict.pop('shortened_names', None)
+                shortened_name_value = None
+                if shortened_name_data:
+                    if isinstance(shortened_name_data, dict):
+                        shortened_name_value = shortened_name_data.get('shortened_name')
+                    elif isinstance(shortened_name_data, list) and len(shortened_name_data) > 0:
+                        shortened_name_value = shortened_name_data[0].get('shortened_name')
+                
+                market_dict['shortened_name'] = shortened_name_value
                 markets.append(Market(**market_dict))
             
             return markets
@@ -737,6 +805,146 @@ class DatabaseService:
             
         except Exception as e:
             logger.error(f"Batch embedding storage failed: {e}")
+            raise
+    
+    # ==================== SHORTENED NAME OPERATIONS ====================
+    
+    async def store_shortened_name(
+        self,
+        market_id: int,
+        original_name: str,
+        shortened_name: str
+    ) -> ShortenedName:
+        """
+        Store or update a shortened name for a market.
+        
+        Args:
+            market_id: Market database ID
+            original_name: Original market question
+            shortened_name: Shortened name (3 words)
+            
+        Returns:
+            ShortenedName object
+        """
+        try:
+            # Check if exists
+            existing = await self.get_shortened_name(market_id)
+            now = datetime.utcnow().isoformat()
+            
+            if existing:
+                # Update existing
+                data = {
+                    'market_id': market_id,
+                    'original_name': original_name,
+                    'shortened_name': shortened_name,
+                    'updated_at': now
+                }
+            else:
+                # Create new
+                data = {
+                    'market_id': market_id,
+                    'original_name': original_name,
+                    'shortened_name': shortened_name,
+                    'created_at': now,
+                    'updated_at': now
+                }
+            
+            # Upsert: update if exists, insert if not
+            response = self.client.table('shortened_names').upsert(
+                data,
+                on_conflict='market_id'
+            ).execute()
+            
+            if response.data:
+                return ShortenedName(**response.data[0])
+            raise Exception("Failed to store shortened name")
+            
+        except Exception as e:
+            logger.error(f"Error storing shortened name: {e}")
+            raise
+    
+    async def get_shortened_name(self, market_id: int) -> Optional[ShortenedName]:
+        """
+        Get shortened name for a market.
+        
+        Args:
+            market_id: Market database ID
+            
+        Returns:
+            ShortenedName if found, None otherwise
+        """
+        try:
+            response = self.client.table('shortened_names').select('*').eq('market_id', market_id).execute()
+            
+            if response.data:
+                return ShortenedName(**response.data[0])
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error getting shortened name: {e}")
+            raise
+    
+    async def batch_get_shortened_names(self, market_ids: List[int]) -> List[ShortenedName]:
+        """
+        Get shortened names for multiple markets.
+        
+        Args:
+            market_ids: List of market database IDs
+            
+        Returns:
+            List of ShortenedName objects
+        """
+        try:
+            if not market_ids:
+                return []
+            
+            response = self.client.table('shortened_names').select('*').in_('market_id', market_ids).execute()
+            
+            return [ShortenedName(**name) for name in response.data]
+            
+        except Exception as e:
+            logger.error(f"Error batch getting shortened names: {e}")
+            raise
+    
+    async def get_all_shortened_names(
+        self,
+        limit: int = 100,
+        offset: int = 0
+    ) -> List[ShortenedName]:
+        """
+        Get all shortened names with pagination.
+        
+        Args:
+            limit: Maximum number of results
+            offset: Number of results to skip
+            
+        Returns:
+            List of ShortenedName objects
+        """
+        try:
+            response = self.client.table('shortened_names').select('*').order(
+                'created_at', desc=True
+            ).range(offset, offset + limit - 1).execute()
+            
+            return [ShortenedName(**name) for name in response.data]
+            
+        except Exception as e:
+            logger.error(f"Error getting all shortened names: {e}")
+            raise
+    
+    async def count_shortened_names(self) -> int:
+        """
+        Count total number of shortened names.
+        
+        Returns:
+            Total count
+        """
+        try:
+            response = self.client.table('shortened_names').select('id', count='exact').execute()
+            return response.count if response.count is not None else 0
+            
+        except Exception as e:
+            logger.error(f"Error counting shortened names: {e}")
             raise
 
 
