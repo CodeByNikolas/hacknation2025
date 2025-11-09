@@ -9,10 +9,66 @@ from app.schemas.relation_schema import (
     MarketRelation,
     MarketRelationCreate,
     MarketRelationBatchCreate,
+    EnrichedRelatedMarket,
+    EnrichedRelationResponse,
 )
 from app.services.relation_service import get_relation_service
 
 router = APIRouter(prefix="/relations", tags=["Relations"])
+
+
+@router.get("/{market_id}/enriched", response_model=EnrichedRelationResponse)
+async def get_related_markets_enriched(
+    market_id: int,
+    limit: int = Query(10, ge=1, le=100, description="Maximum number of related markets"),
+    min_similarity: float = Query(0.7, ge=0.0, le=1.0, description="Minimum similarity threshold")
+):
+    """
+    Get related markets with full market details (enriched data).
+    Returns markets with similarity >= min_similarity threshold, including full market objects.
+    
+    Example: `/relations/123/enriched?limit=10&min_similarity=0.7`
+    
+    Args:
+        market_id: Source market ID
+        limit: Maximum number of results (default: 10)
+        min_similarity: Minimum similarity score (default: 0.7)
+    
+    Returns:
+        Enriched response with full market details for each related market
+    """
+    try:
+        service = get_relation_service()
+        
+        # Get enriched results with full market data (service handles all DB calls)
+        result = await service.get_related_markets_enriched(
+            market_id=market_id,
+            limit=limit,
+            min_similarity=min_similarity,
+            include_source=True
+        )
+        
+        return EnrichedRelationResponse(
+            source_market_id=market_id,
+            source_market=result["source_market"],
+            related_markets=[
+                EnrichedRelatedMarket(
+                    market_id=mid,
+                    similarity=sim,
+                    correlation=corr,
+                    pressure=press,
+                    market=market,
+                    ai_correlation_score=ai_score,
+                    ai_explanation=ai_explanation
+                )
+                for mid, sim, corr, press, market, ai_score, ai_explanation in result["related_markets"]
+            ],
+            count=len(result["related_markets"])
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/{market_id}", response_model=RelationSearchResponse)
@@ -22,7 +78,7 @@ async def get_related_markets(
     min_similarity: float = Query(0.7, ge=0.0, le=1.0, description="Minimum similarity threshold")
 ):
     """
-    Get related markets from stored relations in database.
+    Get related markets from stored relations in database (basic version).
     Returns markets with similarity >= min_similarity threshold.
     
     Example: `/relations/123?limit=10&min_similarity=0.7`

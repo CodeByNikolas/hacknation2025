@@ -6,6 +6,7 @@ from app.schemas.relation_schema import MarketRelation, MarketRelationCreate
 from app.schemas.market_schema import Market
 from app.services.database_service import get_database_service
 from app.services.vector_service import get_vector_service
+from app.utils.openai_service import get_openai_helper
 import logging
 import numpy as np
 
@@ -72,6 +73,95 @@ class RelationService:
             
         except Exception as e:
             logger.error(f"Error getting related markets: {e}")
+            raise
+    
+    async def get_related_markets_enriched(
+        self,
+        market_id: int,
+        limit: int = 10,
+        min_similarity: float = 0.7,
+        include_source: bool = True,
+        include_ai_analysis: bool = True
+    ) -> dict:
+        """
+        Get related markets from stored relations with full market details and AI correlation analysis.
+        
+        Args:
+            market_id: Source market ID
+            limit: Maximum number of results
+            min_similarity: Minimum similarity threshold
+            include_source: Whether to include source market details (default: True)
+            include_ai_analysis: Whether to include AI-generated correlation analysis (default: True)
+            
+        Returns:
+            Dictionary with:
+            - source_market: Market object (if include_source=True, else None)
+            - related_markets: List of (related_market_id, similarity, correlation, pressure, market_object, ai_score, ai_explanation) tuples
+        """
+        try:
+            # Get source market if requested
+            source_market = None
+            if include_source:
+                source_market = await self.db.get_market_by_id(market_id)
+                if not source_market:
+                    raise ValueError(f"Source market {market_id} not found")
+            
+            # Get basic relations
+            basic_results = await self.get_related_markets(
+                market_id=market_id,
+                limit=limit,
+                min_similarity=min_similarity
+            )
+            
+            # Enrich with full market data and AI analysis
+            enriched_results = []
+            openai_helper = None
+            if include_ai_analysis:
+                openai_helper = get_openai_helper()
+            
+            for related_id, similarity, correlation, pressure in basic_results:
+                # Fetch full market details
+                market = await self.db.get_market_by_id(related_id)
+                if not market:
+                    continue
+                
+                ai_correlation_score = None
+                ai_explanation = None
+                
+                # Get AI correlation analysis if enabled
+                if include_ai_analysis and source_market and openai_helper:
+                    try:
+                        logger.info(f"Analyzing correlation between market {market_id} and {related_id} using AI...")
+                        analysis = await openai_helper.analyze_market_correlation(
+                            market1_question=source_market.question,
+                            market1_description=source_market.description,
+                            market2_question=market.question,
+                            market2_description=market.description
+                        )
+                        ai_correlation_score = analysis.correlation_score
+                        ai_explanation = analysis.explanation
+                        logger.info(f"AI correlation: {ai_correlation_score:.3f}")
+                    except Exception as e:
+                        logger.warning(f"Failed to get AI correlation analysis for markets {market_id}-{related_id}: {e}")
+                        # Continue without AI analysis rather than failing completely
+                
+                enriched_results.append((
+                    related_id,
+                    similarity,
+                    correlation,
+                    pressure,
+                    market,
+                    ai_correlation_score,
+                    ai_explanation
+                ))
+            
+            return {
+                "source_market": source_market,
+                "related_markets": enriched_results
+            }
+            
+        except Exception as e:
+            logger.error(f"Error getting enriched related markets: {e}")
             raise
     
     async def get_relation_between(
@@ -256,82 +346,75 @@ class RelationService:
         Returns:
             Correlation score (0.0-1.0)
         """
-        # If either market doesn't have outcome prices, return 0
-        if not market1.outcome_prices or not market2.outcome_prices:
-            return 0.0
-        
-        try:
-            # Convert price strings to floats
-            prices1 = [float(p) for p in market1.outcome_prices if p]
-            prices2 = [float(p) for p in market2.outcome_prices if p]
-            
-            # Need at least 2 prices to calculate correlation
-            if len(prices1) < 2 or len(prices2) < 2:
-                return 0.0
-            
-            # Normalize prices to 0-1 range if needed
-            # Take the first outcome price as a proxy for market sentiment
-            # For binary markets, use the "Yes" outcome price
-            price1 = prices1[0] if prices1 else 0.0
-            price2 = prices2[0] if prices2 else 0.0
-            
-            # Simple correlation: how similar are the prices?
-            # If both markets are bullish (high prices) or bearish (low prices), correlation is high
-            price_diff = abs(price1 - price2)
-            correlation = 1.0 - min(price_diff, 1.0)  # Inverse of price difference
-            
-            return max(0.0, min(1.0, correlation))
-            
-        except (ValueError, IndexError) as e:
-            logger.debug(f"Error calculating correlation: {e}")
-            return 0.0
+        return 1.0 # TODO: Implement correlation calculation
     
     def calculate_pressure(
         self,
         similarity: float,
         correlation: float,
-        volume1: float,
-        volume2: float
+        market1: Market,
+        market2: Market
     ) -> float:
         """
-        Calculate pressure score based on similarity, correlation, and volumes.
+        Calculate pressure score based on similarity, correlation, and volatility difference.
         
         Pressure represents the "strength" or "intensity" of the relationship.
-        Higher pressure = stronger relationship.
-        
-        Formula: pressure = similarity * correlation * volume_factor
+        Higher volatility difference = higher pressure (more dynamic relationship).
         
         Args:
             similarity: Similarity score (0.0-1.0)
             correlation: Correlation score (0.0-1.0)
-            volume1: Volume of first market
-            volume2: Volume of second market
+            market1: First market object
+            market2: Second market object
             
         Returns:
             Pressure score (0.0-1.0)
         """
-        # Normalize volumes (log scale to handle large differences)
-        # Use average volume as a proxy
-        avg_volume = (volume1 + volume2) / 2.0
+        volatility1 = self._calculate_volatility_from_price_changes(market1)
+        volatility2 = self._calculate_volatility_from_price_changes(market2)
         
-        # Normalize volume to 0-1 range using log scale
-        # Assuming max volume is around 1M, adjust as needed
-        if avg_volume <= 0:
-            volume_factor = 0.1  # Minimum factor for zero volume
+        volatility_diff = abs(volatility1 - volatility2)
+        
+        if volatility_diff <= 0:
+            pressure_factor = 0.1
         else:
-            # Log normalization: log(1 + volume) / log(1 + max_volume)
-            # Using 1M as max volume reference
-            max_volume_ref = 1_000_000.0
-            volume_factor = min(1.0, np.log1p(avg_volume) / np.log1p(max_volume_ref))
-            # Ensure minimum of 0.1 to avoid zero pressure
-            volume_factor = max(0.1, volume_factor)
+            pressure_factor = min(1.0, np.sqrt(volatility_diff))
+            pressure_factor = max(0.1, pressure_factor)
         
-        # Pressure = similarity * correlation * volume_factor
-        # This ensures pressure is high only when all factors are high
-        pressure = similarity * correlation * volume_factor
+        pressure = similarity * correlation * pressure_factor
         
-        # Normalize to 0-1 range
         return max(0.0, min(1.0, pressure))
+    
+    def _calculate_volatility_from_price_changes(self, market: Market) -> float:
+        """
+        Calculate volatility from price change data.
+        
+        Uses the average of absolute price changes as a measure of volatility.
+        
+        Args:
+            market: Market object with price change data
+            
+        Returns:
+            Volatility score (0.0+, typically 0-1 range)
+        """
+        price_changes = []
+        
+        # Collect all available price changes (as absolute values)
+        if market.one_day_price_change is not None:
+            price_changes.append(abs(market.one_day_price_change))
+        
+        if market.one_week_price_change is not None:
+            price_changes.append(abs(market.one_week_price_change))
+        
+        if market.one_month_price_change is not None:
+            price_changes.append(abs(market.one_month_price_change))
+        
+        # If no price change data, return 0
+        if not price_changes:
+            return 0.0
+        
+        # Return average of absolute price changes as volatility
+        return sum(price_changes) / len(price_changes)
     
     # ==================== RELATION DISCOVERY METHODS ====================
     
@@ -436,8 +519,8 @@ class RelationService:
                 pressure = self.calculate_pressure(
                     similarity=similarity,
                     correlation=correlation,
-                    volume1=market.volume or 0.0,
-                    volume2=similar_market.volume or 0.0
+                    market1=market,
+                    market2=similar_market
                 )
                 
                 # Create relation

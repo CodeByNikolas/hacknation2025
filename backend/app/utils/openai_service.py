@@ -410,6 +410,72 @@ Generate topics that represent the key concepts, domains, industries, technologi
         # Sort by similarity and return top_k
         similarities.sort(key=lambda x: x[1], reverse=True)
         return similarities[:top_k]
+    
+    # ==================== MARKET CORRELATION ANALYSIS ====================
+    
+    async def analyze_market_correlation(
+        self,
+        market1_question: str,
+        market1_description: Optional[str],
+        market2_question: str,
+        market2_description: Optional[str]
+    ) -> 'MarketCorrelationAnalysis':
+        """
+        Use AI to analyze if two markets influence each other and generate a correlation score.
+        
+        Args:
+            market1_question: Question for the first market
+            market1_description: Description for the first market (optional)
+            market2_question: Question for the second market
+            market2_description: Description for the second market (optional)
+            
+        Returns:
+            MarketCorrelationAnalysis with AI-generated correlation score and explanation
+        """
+        from app.schemas.vector_schema import MarketCorrelationAnalysis
+        
+        # Build context for both markets
+        market1_context = f"Market 1: {market1_question}"
+        if market1_description:
+            market1_context += f"\nDescription: {market1_description}"
+        
+        market2_context = f"Market 2: {market2_question}"
+        if market2_description:
+            market2_context += f"\nDescription: {market2_description}"
+        
+        system_message = """You are an expert analyst evaluating whether two prediction markets influence each other.
+Your task is to assess the correlation between the events and provide:
+1. A correlation score (0.0 to 1.0) indicating how much these events influence each other
+2. A brief explanation (2-3 sentences maximum) of the relationship
+
+Correlation score guidelines:
+- 0.0-0.3: Little to no influence between events
+- 0.4-0.6: Moderate influence or indirect relationship
+- 0.7-0.9: Strong influence or direct causal relationship
+- 1.0: Events are essentially the same or perfectly correlated
+
+Be concise and focus on the actual causal or correlational relationship."""
+
+        prompt = f"""{market1_context}
+
+{market2_context}
+
+Analyze whether these two prediction market events influence or correlate with each other. 
+Consider:
+- Do they share common underlying factors?
+- Would the outcome of one affect the other?
+- Are they related to the same themes, topics, or events?
+
+Provide your correlation assessment."""
+
+        # Get structured output
+        analysis = await self.get_structured_output(
+            prompt=prompt,
+            response_model=MarketCorrelationAnalysis,
+            system_message=system_message
+        )
+        
+        return analysis
 
 async def similarity_search_datasets(
     self,
