@@ -14,7 +14,7 @@ Welcome to Hack-Nation, a full-stack platform for analyzing and visualizing data
 **🥇 Challenge Group Winner**  
 **🎨 Creativity Prize Winner**
 
-Built in 24 hours, recognized for innovation and creativity in AI-powered market analysis.
+Built in 39 hours, recognized for innovation and creativity in AI-powered market analysis.
 
 ---
 
