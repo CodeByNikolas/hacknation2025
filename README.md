@@ -10,7 +10,7 @@ Welcome to Hack-Nation, a full-stack platform for analyzing and visualizing data
 
 ## 🏆 Hackathon Achievements
 
-**🥇 Top 4 Team Overall**  
+**🥇 Top 10 Team Overall**  
 **🥇 Challenge Group Winner**  
 **🎨 Creativity Prize Winner**
 
