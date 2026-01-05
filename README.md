@@ -524,10 +524,10 @@ curl -X POST "http://localhost:8000/api/vectors/search" \
 
 ---
 
-## 💪 What We Achieved in 24 Hours
+## 💪 What We Achieved in 39 Hours
 
 This project demonstrates:
-- ✅ **Top 4 Overall Finish** among all competing teams
+- ✅ **Top 10 Overall Finish** among all competing teams
 - ✅ **Challenge Group Winner** for innovation in financial technology
 - ✅ **Creativity Prize** for novel approach to market analysis
 - ✅ Rapid prototyping with modern AI tools
